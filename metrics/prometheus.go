@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/boiler/ciri/config"
@@ -20,7 +21,7 @@ type PrometheusMetrics struct {
 	Labels     []string
 }
 
-func Init(cfg *config.Config, pms []*PrometheusMetrics) {
+func InitPrometheus(cfg *config.Config, pms []*PrometheusMetrics) {
 
 	for _, pm := range pms {
 		for _, v := range pm.GaugeNames {
@@ -51,7 +52,6 @@ func Init(cfg *config.Config, pms []*PrometheusMetrics) {
 	for _, v := range countMap {
 		prometheus.MustRegister(v)
 	}
-
 }
 
 func getLabels(m string, lv ...interface{}) prometheus.Labels {
@@ -59,11 +59,15 @@ func getLabels(m string, lv ...interface{}) prometheus.Labels {
 	i := 0
 	for i = 0; i < len(labelsFieldsMap[m]); i++ {
 		f := labelsFieldsMap[m][i]
-		switch lv[i].(type) {
+		switch t := lv[i].(type) {
+		case string:
+			labels[f] = fmt.Sprintf("%s", lv[i])
+		case bool:
+			labels[f] = fmt.Sprintf("%t", lv[i])
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 			labels[f] = fmt.Sprintf("%d", lv[i])
 		default:
-			labels[f] = fmt.Sprintf("%s", lv[i])
+			log.Printf("unknown metric label type: %T", t)
 		}
 	}
 	return labels

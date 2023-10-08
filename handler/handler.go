@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 
 	"log"
@@ -95,17 +94,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 
-		} else if strings.HasPrefix(r.URL.Path, "/v1/task/get/") && len(r.URL.Path) == len("/v1/task/get/")+36 {
-			uuid := r.URL.Path[len("/v1/task/get/"):]
-
-			task, err := h.db.GetTask(uuid)
-			if err != nil {
-				h.retErr(w, err.Error())
+		} else if r.URL.Path == "/v1/task/get/" {
+			index := ""
+			arg := ""
+			if r.URL.Query().Get("id") != "" {
+				index = "id"
+				arg = r.URL.Query().Get("id")
+			}
+			if r.URL.Query().Get("sticker") != "" {
+				if index != "" {
+					h.retErr(w, "only one index posible")
+					return
+				}
+				index = "sticker"
+				arg = r.URL.Query().Get("sticker")
+			}
+			if index == "" {
+				h.retErr(w, "index not specified")
 				return
 			}
-			json, _ := json.Marshal(task)
-			w.Write(json)
-			w.Write([]byte("\n"))
+			ch := make(chan *db.Task)
+			go h.db.GetTasks(ch, index, arg)
+			for t := range ch {
+				json, _ := json.Marshal(t)
+				w.Write(json)
+				w.Write([]byte("\n"))
+			}
 			return
 
 		}
@@ -124,7 +138,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			task := h.db.EmptyTask()
 			err = json.Unmarshal(body, &task)
 			if err != nil {
-				h.retErr(w, "can't parse body json")
+				h.retErr(w, "can't parse body json: "+err.Error())
 				return
 			}
 			err := h.db.InsertTasks([]*db.Task{&task})
@@ -135,28 +149,37 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			type OkData struct {
 				Result string `json:"result"`
-				UUID   string `json:"uuid"`
+				Id     string `json:"id"`
 			}
-			okData, _ := json.Marshal(OkData{"ok", task.UUID})
+			okData, _ := json.Marshal(OkData{"ok", task.Id})
 			w.Write(okData)
 			w.Write([]byte("\n"))
 			return
 
-		} else if r.URL.Path == "/v1/task/update" {
+		} else if r.URL.Path == "/v1/task/update" || r.URL.Path == "/v1/task/done" || r.URL.Path == "/v1/task/refuse" {
+			state := 2
+			if r.URL.Path == "/v1/task/done" {
+				state = 3
+			} else if r.URL.Path == "/v1/task/refuse" {
+				state = 0
+			}
 			type PostData struct {
-				UUID    string             `json:"uuid"`
+				Id      string             `json:"id"`
 				Worker  string             `json:"worker"`
-				Done    bool               `json:"done"`
+				Error   bool               `json:"error"`
 				Status  string             `json:"status"`
 				Metrics map[string]float64 `json:"metrics"`
 			}
 			postData := &PostData{}
+			if state == 3 && postData.Error {
+				state = 4
+			}
 			err = json.Unmarshal(body, postData)
 			if err != nil {
 				h.retErr(w, err.Error())
 				return
 			}
-			task, err := h.db.GetTask(postData.UUID)
+			task, err := h.db.GetTask("id", postData.Id)
 			if err != nil {
 				h.retErr(w, err.Error())
 				return
@@ -177,16 +200,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.retErr(w, "task worker mismatch")
 				return
 			}
-			if err := h.db.UpdateTask(task, postData.Status, postData.Done); err != nil {
+			if err := h.db.UpdateTask(task, state, postData.Status); err != nil {
 				h.retErr(w, err.Error())
 				return
 			}
 			for k, v := range postData.Metrics {
 				if stringSliceContains(h.cfg.WorkerCustomGaugeMetrics, k) {
-					metrics.GaugeSet(k, v, task.Namespace, task.Priority, task.Pool)
+					metrics.GaugeSet(k, v, task.Sticker, task.Priority, task.Pool)
 				}
 				if stringSliceContains(h.cfg.WorkerCustomCountMetrics, k) {
-					metrics.CountAdd(k, v, task.Namespace, task.Priority, task.Pool)
+					metrics.CountAdd(k, v, task.Sticker, task.Priority, task.Pool)
 				}
 			}
 			w.Write([]byte(`{"result":"ok"}` + "\n"))
@@ -194,7 +217,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		} else if r.URL.Path == "/v1/task/delete" {
 			type PostData struct {
-				UUID string `json:"uuid"`
+				Id string `json:"id"`
 			}
 			postData := &PostData{}
 			err = json.Unmarshal(body, postData)
@@ -202,7 +225,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.retErr(w, err.Error())
 				return
 			}
-			task, err := h.db.GetTask(postData.UUID)
+			task, err := h.db.GetTask("id", postData.Id)
 			if err != nil {
 				h.retErr(w, err.Error())
 				return

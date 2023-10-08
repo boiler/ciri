@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	_ "net/http/pprof"
+
+	//_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -23,23 +24,7 @@ func main() {
 	}
 	log.Print("Start")
 
-	prometheusMetrics := []*metrics.PrometheusMetrics{
-		&metrics.PrometheusMetrics{
-			GaugeNames: []string{"tasks_count"},
-			Labels:     []string{"namespace", "priority", "pool", "state"},
-		},
-		&metrics.PrometheusMetrics{
-			CountNames: []string{"tasks_acquired", "tasks_inserted", "tasks_done"},
-			Labels:     []string{"namespace", "priority", "pool"},
-		},
-		&metrics.PrometheusMetrics{
-			GaugeNames: cfg.WorkerCustomGaugeMetrics,
-			CountNames: cfg.WorkerCustomCountMetrics,
-			Labels:     []string{"namespace", "priority", "pool"},
-		},
-	}
-	metrics.Init(cfg, prometheusMetrics)
-
+	metrics.Init(cfg)
 	h := handler.New(cfg)
 	h.Init()
 

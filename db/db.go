@@ -17,17 +17,16 @@ import (
 )
 
 type Task struct {
-	UUID      string `json:"uuid"`
-	Namespace string `json:"namespace"`
-	Key       string `json:"key"`
-	Priority  int    `json:"priority"`
-	Body      []byte `json:"body"`
-	Pool      string `json:"pool"`
-	State     int    `json:"state"` // 0:NEW, 1:ACQUIRED, 2:WORK, 3:DONE
-	Status    string `json:"status,omitempty"`
-	Worker    string `json:"worker,omitempty"`
-	Added     uint64 `json:"added"`
-	Updated   uint64 `json:"updated"`
+	Id       string `json:"id"`
+	Sticker  string `json:"sticker"`
+	Priority int    `json:"priority"`
+	Body     string `json:"body"`
+	Pool     string `json:"pool"`
+	State    int    `json:"state"` // 0:NEW, 1:ACQUIRED, 2:WORK, 3:DONE, 4:ERROR
+	Status   string `json:"status,omitempty"`
+	Worker   string `json:"worker,omitempty"`
+	Added    uint64 `json:"added"`
+	Updated  uint64 `json:"updated"`
 }
 
 type DB struct {
@@ -49,21 +48,12 @@ func NewDB(cfg *config.Config) (*DB, error) {
 					"id": &memdb.IndexSchema{
 						Name:    "id",
 						Unique:  true,
-						Indexer: &memdb.UUIDFieldIndex{Field: "UUID"},
+						Indexer: &memdb.StringFieldIndex{Field: "Id"},
 					},
-					"nskey": &memdb.IndexSchema{
-						Name: "nskey",
-						Indexer: &memdb.CompoundIndex{
-							Indexes: []memdb.Indexer{
-								&memdb.StringFieldIndex{
-									Field: "Namespace",
-								},
-
-								&memdb.StringFieldIndex{
-									Field: "Key",
-								},
-							},
-						},
+					"sticker": &memdb.IndexSchema{
+						Name:    "sticker",
+						Unique:  false,
+						Indexer: &memdb.StringFieldIndex{Field: "Sticker"},
 					},
 					"state": &memdb.IndexSchema{
 						Name: "state",
@@ -132,10 +122,10 @@ func (db *DB) InsertTasks(tasks []*Task) error {
 	txn := db.memdb.Txn(true)
 	defer txn.Abort()
 	for _, t := range tasks {
-		if t.UUID == "" {
-			t.UUID = uuid.NewString()
+		if t.Id == "" {
+			t.Id = uuid.NewString()
 		} else {
-			r, err := txn.First("tasks", "id", t.UUID)
+			r, err := txn.First("tasks", "id", t.Id)
 			if err != nil {
 				return err
 			}
@@ -143,30 +133,20 @@ func (db *DB) InsertTasks(tasks []*Task) error {
 				return fmt.Errorf("duplicate key: id")
 			}
 		}
-		if t.Namespace == "" {
-			t.Namespace = "default"
-		}
-		if t.Key == "" {
-			t.Key = t.UUID
+		if t.Sticker == "" {
+			t.Sticker = "default"
 		}
 		if t.Pool == "" {
 			t.Pool = "default"
-		}
-		r, err := txn.First("tasks", "nskey", t.Namespace, t.Key)
-		if err != nil {
-			return err
-		}
-		if r != nil {
-			return fmt.Errorf("duplicate key: nskey")
 		}
 		t.Added = uint64(time.Now().Unix())
 		t.Updated = t.Added
 		if err := txn.Insert("tasks", t); err != nil {
 			return err
 		}
-		metrics.GaugeInc("tasks_count", t.Namespace, t.Priority, t.Pool, t.State)
-		metrics.CountAdd("tasks_acquired", 1, t.Namespace, t.Priority, t.Pool)
-		log.Printf("task %s inserted: namespace: %s, key: %s", t.UUID, t.Namespace, t.Key)
+		metrics.CountAdd("tasks_inserted", 1, t.Sticker, t.Priority, t.Pool)
+		metrics.GaugeInc("tasks_count", t.Sticker, t.Priority, t.Pool, t.State)
+		log.Printf("task %s inserted", t.Id)
 	}
 	txn.Commit()
 	return nil
@@ -193,6 +173,7 @@ func (db *DB) AcquireTask(workerName string) (*Task, error) {
 	}
 
 	task := db.EmptyTask() // copy required for update
+	updateMetrics := true
 
 activeLoop:
 	for _, s := range []int{1, 2} {
@@ -204,12 +185,13 @@ activeLoop:
 			t := obj.(*Task)
 			if t.Worker == workerName {
 				task = *t // copy
+				updateMetrics = false
 				break activeLoop
 			}
 		}
 	}
 
-	if task.UUID == "" {
+	if task.Id == "" {
 		it, err := txn.Get("tasks", "q")
 		if err != nil {
 			return nil, err
@@ -230,7 +212,7 @@ activeLoop:
 			break
 		}
 	}
-	if task.UUID == "" {
+	if task.Id == "" {
 		return nil, nil
 	}
 
@@ -242,33 +224,45 @@ activeLoop:
 		return nil, err
 	}
 	txn.Commit()
-	log.Printf("task %s acquired by worker %s", task.UUID, workerName)
-	metrics.GaugeDec("tasks_count", task.Namespace, task.Priority, task.Pool, 0)
-	metrics.GaugeInc("tasks_count", task.Namespace, task.Priority, task.Pool, task.State)
+	log.Printf("task %s acquired by worker %s", task.Id, workerName)
+	if updateMetrics {
+		metrics.CountAdd("tasks_acquired", 1, task.Sticker, task.Priority, task.Pool)
+		metrics.GaugeDec("tasks_count", task.Sticker, task.Priority, task.Pool, 0)
+		metrics.GaugeInc("tasks_count", task.Sticker, task.Priority, task.Pool, task.State)
+	}
 	return &task, nil
 }
 
-func (db *DB) UpdateTask(t *Task, status string, done bool) error {
+func (db *DB) UpdateTask(t *Task, state int, status string) error {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
 	txn := db.memdb.Txn(true)
 	defer txn.Abort()
 
 	task := *t // copy required for update
+	task.State = state
 	task.Status = status
-	task.State = 2 // WORK
 	task.Updated = uint64(time.Now().Unix())
-	if done {
-		task.State = 3 // DONE
-		metrics.CountAdd("tasks_done", 1, task.Namespace, task.Priority, task.Pool)
-	}
+
 	if err := txn.Insert("tasks", &task); err != nil { // update
 		return err
 	}
 	txn.Commit()
-	metrics.GaugeDec("tasks_count", t.Namespace, t.Priority, t.Pool, t.State)
-	metrics.GaugeInc("tasks_count", task.Namespace, task.Priority, task.Pool, task.State)
-	log.Printf("task %s updated: status: %s, done: %t", t.UUID, status, done)
+
+	metrics.GaugeDec("tasks_count", t.Sticker, t.Priority, t.Pool, t.State)
+	metrics.GaugeInc("tasks_count", task.Sticker, task.Priority, task.Pool, task.State)
+	log.Printf("task %s updated: state: %d, status: %s", t.Id, state, status)
+
+	switch state {
+	case 3:
+		metrics.CountAdd("tasks_done", 1, task.Sticker, task.Priority, task.State, false)
+	case 4:
+		metrics.CountAdd("tasks_done", 1, task.Sticker, task.Priority, task.State, true)
+	case 0:
+		metrics.CountAdd("tasks_refused", 1, task.Sticker, task.Priority, task.State)
+	default:
+		metrics.CountAdd("tasks_updated", 1, task.Sticker, task.Priority, task.Pool)
+	}
 	return nil
 }
 
@@ -281,14 +275,16 @@ func (db *DB) DeleteTask(t *Task) error {
 	if err := txn.Delete("tasks", t); err != nil {
 		return err
 	}
-	log.Printf("task %s deleted: state: %d", t.UUID, t.State)
-	metrics.GaugeDec("tasks_count", t.Namespace, t.Priority, t.Pool, t.State)
+	txn.Commit()
+	log.Printf("task %s deleted: state: %d", t.Id, t.State)
+	metrics.CountAdd("tasks_deleted", 1, t.Sticker, t.Priority, t.Pool)
+	metrics.GaugeDec("tasks_count", t.Sticker, t.Priority, t.Pool, t.State)
 	return nil
 }
 
-func (db *DB) GetTask(uuid string) (*Task, error) {
+func (db *DB) GetTask(index string, args ...interface{}) (*Task, error) {
 	txn := db.memdb.Txn(false)
-	r, err := txn.First("tasks", "id", uuid)
+	r, err := txn.First("tasks", index, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -383,23 +379,11 @@ func (db *DB) ReadSnapshot(path string) error {
 		if err != nil {
 			return err
 		}
-		if t.State > 0 && t.State < 3 {
-			t.State = 0
-			t.Status = ""
-			t.Worker = ""
-			t.Updated = t.Added
-		}
-		if t.Added == 0 {
-			t.Added = uint64(time.Now().Unix())
-		}
-		if t.Updated == 0 {
-			t.Updated = t.Added
-		}
 		err = txn.Insert("tasks", &t)
 		if err != nil {
 			return err
 		}
-		metrics.GaugeInc("tasks_count", t.Namespace, t.Priority, t.Pool, t.State)
+		metrics.GaugeInc("tasks_count", t.Sticker, t.Priority, t.Pool, t.State)
 	}
 	txn.Commit()
 	log.Printf("reading snapshot done")
