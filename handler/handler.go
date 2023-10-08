@@ -125,7 +125,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if r.Method == http.MethodPost {
 		if h.safeMode {
-			h.retErr(w, "server in safemode")
+			h.retErrCode(w, http.StatusServiceUnavailable, "server in safemode")
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		body, err := io.ReadAll(r.Body)
@@ -282,6 +283,10 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) retErr(w http.ResponseWriter, errs ...string) {
+	h.retErrCode(w, http.StatusBadRequest, errs...)
+}
+
+func (h *Handler) retErrCode(w http.ResponseWriter, code int, errs ...string) {
 	for _, v := range errs {
 		log.Printf(v)
 	}
@@ -292,7 +297,7 @@ func (h *Handler) retErr(w http.ResponseWriter, errs ...string) {
 		Errors: errs,
 	})
 	//w.Header().Set("content-type", "application/json")
-	w.WriteHeader(http.StatusBadRequest)
+	w.WriteHeader(code)
 	w.Write(errData)
 	w.Write([]byte("\n"))
 }

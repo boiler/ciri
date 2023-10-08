@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -33,10 +34,15 @@ func NewConfig() *Config {
 		MetricsPrefix:      myName,
 		//MetricsUpdateInterval: 60,
 	}
-	path := fmt.Sprintf("%s.conf", myName)
+	path := os.Getenv(strings.ToUpper(myName) + "_CONFIG_PATH")
+	if path == "" {
+		path = fmt.Sprintf("%s.conf", myName)
+	}
 	if _, err := os.Stat(path); err != nil {
-		log.Printf("config file '%s' not found", path)
+		log.Printf("config file not found: %s", path)
 		return cfg
+	} else {
+		log.Printf("config file: %s", path)
 	}
 	configBodyBytes, err := ioutil.ReadFile(path)
 	if err != nil {

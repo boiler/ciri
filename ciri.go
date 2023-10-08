@@ -17,12 +17,12 @@ import (
 )
 
 func main() {
+	log.Print("start")
 	cfg := config.NewConfig()
 	err := cfg.Parse()
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	log.Print("Start")
 
 	metrics.Init(cfg)
 	h := handler.New(cfg)
