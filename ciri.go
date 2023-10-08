@@ -11,18 +11,37 @@ import (
 
 	"github.com/boiler/ciri/config"
 	"github.com/boiler/ciri/handler"
+	"github.com/boiler/ciri/metrics"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
-
 	cfg := config.NewConfig()
 	err := cfg.Parse()
 	if err != nil {
 		log.Fatal(err.Error())
 	}
+	log.Print("Start")
+
+	prometheusMetrics := []*metrics.PrometheusMetrics{
+		&metrics.PrometheusMetrics{
+			GaugeNames: []string{"tasks_count"},
+			Labels:     []string{"namespace", "priority", "pool", "state"},
+		},
+		&metrics.PrometheusMetrics{
+			CountNames: []string{"tasks_acquired", "tasks_inserted", "tasks_done"},
+			Labels:     []string{"namespace", "priority", "pool"},
+		},
+		&metrics.PrometheusMetrics{
+			GaugeNames: cfg.WorkerCustomGaugeMetrics,
+			CountNames: cfg.WorkerCustomCountMetrics,
+			Labels:     []string{"namespace", "priority", "pool"},
+		},
+	}
+	metrics.Init(cfg, prometheusMetrics)
 
 	h := handler.New(cfg)
-	h.Start()
+	h.Init()
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
@@ -35,13 +54,16 @@ func main() {
 		}
 	}()
 
+	httpMux := http.NewServeMux()
+	httpMux.HandleFunc("/", http.HandlerFunc(h.ServeHTTP))
+	httpMux.Handle("/metrics", promhttp.Handler())
 	httpServer := &http.Server{
 		Addr:    cfg.Listen,
-		Handler: http.HandlerFunc(h.ServeHTTP),
+		Handler: httpMux,
 	}
 	httpServer.SetKeepAlivesEnabled(false)
-	log.Print("started")
+	log.Printf("http server starts listening on %s", cfg.Listen)
 	if err := httpServer.ListenAndServe(); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
