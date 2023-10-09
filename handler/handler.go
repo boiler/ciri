@@ -172,13 +172,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Metrics map[string]float64 `json:"metrics"`
 			}
 			postData := &PostData{}
-			if state == 3 && postData.Error {
-				state = 4
-			}
 			err = json.Unmarshal(body, postData)
 			if err != nil {
 				h.retErr(w, err.Error())
 				return
+			}
+			if state == 3 && postData.Error {
+				state = 4
 			}
 			task, err := h.db.GetTask("id", postData.Id)
 			if err != nil {
