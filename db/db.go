@@ -251,7 +251,7 @@ func (db *DB) UpdateTask(t *Task, state int, status string) error {
 
 	metrics.GaugeDec("tasks_count", t.Sticker, t.Priority, t.Pool, t.State)
 	metrics.GaugeInc("tasks_count", task.Sticker, task.Priority, task.Pool, task.State)
-	log.Printf("task %s updated: state: %d, status: %s", t.Id, state, status)
+	log.Printf("task %s updated: state: %d, status: %s, worker: %s", t.Id, state, status, t.Worker)
 
 	switch state {
 	case 3:
