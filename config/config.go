@@ -18,44 +18,38 @@ type Config struct {
 	DefaultPoolMaxSize int    `toml:"default_pool_max_size"`
 	MetricsPrefix      string `toml:"metrics_prefix"`
 	Pool               map[string]*ConfigPool
-	WorkerCustomMetric map[string]*ConfigWorkerCustomMetric `toml:"worker_custom_metric"`
 }
 type ConfigPool struct {
 	MaxSize int `toml:"max_size"`
 }
-type ConfigWorkerCustomMetric struct {
-	Type   string   `toml:"type"`
-	Labels []string `toml:"labels"`
-}
 
 func NewConfig() *Config {
-	return &Config{
+	myName := filepath.Base(os.Args[0])
+	cfg := &Config{
 		Listen:             ":8080",
 		DefaultPoolMaxSize: 8,
-		MetricsPrefix:      filepath.Base(os.Args[0]),
+		MetricsPrefix:      myName,
 	}
-}
-
-func (cfg *Config) ReadConfig() error {
-	myName := filepath.Base(os.Args[0])
 	path := os.Getenv(strings.ToUpper(myName) + "_CONFIG_PATH")
 	if path == "" {
 		path = fmt.Sprintf("%s.conf", myName)
 	}
 	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("config file not found: %s", path)
+		log.Printf("config file not found: %s", path)
+		return cfg
 	} else {
 		log.Printf("config file: %s", path)
 	}
 	configBodyBytes, err := ioutil.ReadFile(path)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
 	configBody := string(configBodyBytes)
 	if _, err := toml.Decode(configBody, cfg); err != nil {
-		return err
+		log.Fatal(err)
 	}
-	return nil
+
+	return cfg
 }
 
 func (cfg *Config) GetPoolMaxSize(pool string) int {
