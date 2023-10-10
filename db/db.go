@@ -389,8 +389,3 @@ func (db *DB) ReadSnapshot(path string) error {
 	log.Printf("reading snapshot done")
 	return nil
 }
-
-/* func (db *DB) UpdateMetrics(path string) error {
-
-}
-*/

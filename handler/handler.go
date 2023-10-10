@@ -123,7 +123,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 
 		}
+
 	} else if r.Method == http.MethodPost {
+
 		if h.safeMode {
 			h.retErrCode(w, http.StatusServiceUnavailable, "server in safemode")
 			w.WriteHeader(http.StatusBadRequest)
@@ -157,6 +159,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("\n"))
 			return
 
+		} else if r.URL.Path == "/v1/task/acquire" {
+			type PostData struct {
+				Worker  string                         `json:"worker"`
+				Metrics map[string]*metrics.PostMetric `json:"metrics"`
+			}
+			postData := &PostData{}
+			err = json.Unmarshal(body, postData)
+			if err != nil {
+				h.retErr(w, err.Error())
+				return
+			}
+			if err := metrics.ApplyPostMetrics(h.cfg, postData.Metrics); err != nil {
+				log.Print(err)
+			}
+			task, err := h.db.AcquireTask(postData.Worker)
+			if err != nil {
+				h.retErr(w, err.Error())
+				return
+			}
+			type OkData struct {
+				Result string   `json:"result"`
+				Task   *db.Task `json:"task"`
+			}
+			json, _ := json.Marshal(OkData{"ok", task})
+			w.Write(json)
+			return
+
 		} else if r.URL.Path == "/v1/task/update" || r.URL.Path == "/v1/task/done" || r.URL.Path == "/v1/task/refuse" {
 			state := 2
 			if r.URL.Path == "/v1/task/done" {
@@ -165,11 +194,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				state = 0
 			}
 			type PostData struct {
-				Id      string             `json:"id"`
-				Worker  string             `json:"worker"`
-				Error   bool               `json:"error"`
-				Status  string             `json:"status"`
-				Metrics map[string]float64 `json:"metrics"`
+				Id      string                         `json:"id"`
+				Worker  string                         `json:"worker"`
+				Error   bool                           `json:"error"`
+				Status  string                         `json:"status"`
+				Metrics map[string]*metrics.PostMetric `json:"metrics"`
 			}
 			postData := &PostData{}
 			err = json.Unmarshal(body, postData)
@@ -179,6 +208,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if state == 3 && postData.Error {
 				state = 4
+			}
+			if err := metrics.ApplyPostMetrics(h.cfg, postData.Metrics); err != nil {
+				log.Print(err)
 			}
 			task, err := h.db.GetTask("id", postData.Id)
 			if err != nil {
@@ -204,14 +236,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err := h.db.UpdateTask(task, state, postData.Status); err != nil {
 				h.retErr(w, err.Error())
 				return
-			}
-			for k, v := range postData.Metrics {
-				if stringSliceContains(h.cfg.WorkerCustomGaugeMetrics, k) {
-					metrics.GaugeSet(k, v, task.Sticker, task.Priority, task.Pool)
-				}
-				if stringSliceContains(h.cfg.WorkerCustomCountMetrics, k) {
-					metrics.CountAdd(k, v, task.Sticker, task.Priority, task.Pool)
-				}
 			}
 			w.Write([]byte(`{"result":"ok"}` + "\n"))
 			return
@@ -243,30 +267,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(`{"result":"ok"}` + "\n"))
 			return
 
-		} else if r.URL.Path == "/v1/task/acquire" {
-			type PostData struct {
-				Worker string `json:"worker"`
-			}
-			postData := &PostData{}
-			err = json.Unmarshal(body, postData)
-			if err != nil {
-				h.retErr(w, err.Error())
-				return
-			}
-			task, err := h.db.AcquireTask(postData.Worker)
-			if err != nil {
-				h.retErr(w, err.Error())
-				return
-			}
-			type OkData struct {
-				Result string   `json:"result"`
-				Task   *db.Task `json:"task"`
-			}
-			json, _ := json.Marshal(OkData{"ok", task})
-			w.Write(json)
-			return
 		}
-
 	}
 
 	w.WriteHeader(http.StatusNotFound)
