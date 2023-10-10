@@ -18,11 +18,6 @@ func Init(cfg *config.Config) {
 			CountNames: []string{"tasks_done"},
 			Labels:     []string{"sticker", "priority", "pool", "error"},
 		},
-		&PrometheusMetrics{
-			GaugeNames: cfg.WorkerCustomGaugeMetrics,
-			CountNames: cfg.WorkerCustomCountMetrics,
-			Labels:     []string{"sticker", "priority", "pool"},
-		},
 	}
 	InitPrometheus(cfg, prometheusMetrics)
 }

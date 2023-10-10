@@ -16,11 +16,8 @@ type Config struct {
 	SnapshotPath       string `toml:"snapshot_path"`
 	AuthToken          string `toml:"auth_token"`
 	DefaultPoolMaxSize int    `toml:"default_pool_max_size"`
-	Pool               map[string]*ConfigPool
 	MetricsPrefix      string `toml:"metrics_prefix"`
-	//MetricsUpdateInterval    uint     `toml:"metrics_update_interval"`
-	WorkerCustomGaugeMetrics []string `toml:"worker_custom_gauge_metrics"`
-	WorkerCustomCountMetrics []string `toml:"worker_custom_count_metrics"`
+	Pool               map[string]*ConfigPool
 }
 type ConfigPool struct {
 	MaxSize int `toml:"max_size"`
@@ -32,7 +29,6 @@ func NewConfig() *Config {
 		Listen:             ":8080",
 		DefaultPoolMaxSize: 8,
 		MetricsPrefix:      myName,
-		//MetricsUpdateInterval: 60,
 	}
 	path := os.Getenv(strings.ToUpper(myName) + "_CONFIG_PATH")
 	if path == "" {
@@ -54,10 +50,6 @@ func NewConfig() *Config {
 	}
 
 	return cfg
-}
-
-func (cfg *Config) Parse() error {
-	return nil
 }
 
 func (cfg *Config) GetPoolMaxSize(pool string) int {
