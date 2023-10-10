@@ -11,7 +11,6 @@ import (
 
 	"github.com/boiler/ciri/config"
 	"github.com/boiler/ciri/db"
-	"github.com/boiler/ciri/metrics"
 )
 
 type Handler struct {
@@ -161,17 +160,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		} else if r.URL.Path == "/v1/task/acquire" {
 			type PostData struct {
-				Worker  string                         `json:"worker"`
-				Metrics map[string]*metrics.PostMetric `json:"metrics"`
+				Worker string `json:"worker"`
 			}
 			postData := &PostData{}
 			err = json.Unmarshal(body, postData)
 			if err != nil {
 				h.retErr(w, err.Error())
 				return
-			}
-			if err := metrics.ApplyPostMetrics(h.cfg, postData.Metrics); err != nil {
-				log.Print(err)
 			}
 			task, err := h.db.AcquireTask(postData.Worker)
 			if err != nil {
@@ -194,11 +189,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				state = 0
 			}
 			type PostData struct {
-				Id      string                         `json:"id"`
-				Worker  string                         `json:"worker"`
-				Error   bool                           `json:"error"`
-				Status  string                         `json:"status"`
-				Metrics map[string]*metrics.PostMetric `json:"metrics"`
+				Id     string `json:"id"`
+				Worker string `json:"worker"`
+				Error  bool   `json:"error"`
+				Status string `json:"status"`
 			}
 			postData := &PostData{}
 			err = json.Unmarshal(body, postData)
@@ -208,9 +202,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if state == 3 && postData.Error {
 				state = 4
-			}
-			if err := metrics.ApplyPostMetrics(h.cfg, postData.Metrics); err != nil {
-				log.Print(err)
 			}
 			task, err := h.db.GetTask("id", postData.Id)
 			if err != nil {
@@ -289,7 +280,7 @@ func (h *Handler) retErr(w http.ResponseWriter, errs ...string) {
 
 func (h *Handler) retErrCode(w http.ResponseWriter, code int, errs ...string) {
 	for _, v := range errs {
-		log.Printf(v)
+		log.Print(v)
 	}
 	type ErrorsData struct {
 		Errors []string `json:"errors"`
@@ -297,7 +288,7 @@ func (h *Handler) retErrCode(w http.ResponseWriter, code int, errs ...string) {
 	errData, _ := json.Marshal(ErrorsData{
 		Errors: errs,
 	})
-	//w.Header().Set("content-type", "application/json")
+	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(code)
 	w.Write(errData)
 	w.Write([]byte("\n"))
@@ -309,13 +300,4 @@ func (h *Handler) Terminate() {
 	if h.cfg.SnapshotPath != "" {
 		h.db.WriteSnapshot(h.cfg.SnapshotPath)
 	}
-}
-
-func stringSliceContains(s []string, e string) bool {
-	for _, a := range s {
-		if a == e {
-			return true
-		}
-	}
-	return false
 }
